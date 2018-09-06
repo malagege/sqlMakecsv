@@ -10,7 +10,12 @@ import (
 	"strings"
 	"time"
 
+	_ "github.com/alexbrainman/odbc"
+	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/joho/godotenv"
 	"github.com/joho/sqltocsv"
 )
@@ -38,22 +43,22 @@ func init() {
 	switch strings.ToUpper(os.Getenv("DISPLAY_MODE")) {
 	case "SHOW_ALL":
 		Info = log.New(io.MultiWriter(os.Stdout, infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(os.Stderr, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
+		Error = log.New(io.MultiWriter(os.Stderr, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
 		Debug = log.New(io.MultiWriter(os.Stdout, infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
 	case "SHOW_ERROR":
 		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(os.Stderr, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
+		Error = log.New(io.MultiWriter(os.Stderr, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
 		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
 	case "HIDE_ALL":
 		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
+		Error = log.New(io.MultiWriter(infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
 		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
 	default: //SHOW_DEBUG
 		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
+		Error = log.New(io.MultiWriter(infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
 		Debug = log.New(io.MultiWriter(os.Stdout, infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 	}
 }
