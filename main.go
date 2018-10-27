@@ -18,6 +18,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/joho/sqltocsv"
+	"github.com/malagege/sql2xlsx"
 )
 
 // for log
@@ -41,10 +42,10 @@ func init() {
 		log.Fatalln("打開日誌文件失敗：", err)
 	}
 	switch strings.ToUpper(os.Getenv("DISPLAY_MODE")) {
-	case "SHOW_ALL":
+	case "SHOW_INFO":
 		Info = log.New(io.MultiWriter(os.Stdout, infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
 		Error = log.New(io.MultiWriter(os.Stderr, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(os.Stdout, infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
+		Debug = log.New(io.MultiWriter(infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
 	case "SHOW_ERROR":
 		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
@@ -56,9 +57,9 @@ func init() {
 		Error = log.New(io.MultiWriter(infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
 		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
-	default: //SHOW_DEBUG
-		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
+	default: //SHOW_ALL
+		Info = log.New(io.MultiWriter(os.Stdout, infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
+		Error = log.New(io.MultiWriter(os.Stdout, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
 		Debug = log.New(io.MultiWriter(os.Stdout, infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 	}
 }
@@ -66,6 +67,7 @@ func init() {
 func main() {
 	_ = os.Mkdir("sql", 0755)
 	_ = os.Mkdir("csv", 0755)
+	_ = os.Mkdir("xlsx", 0755)
 	_ = os.Mkdir("bak", 0755)
 	Info.Println("sqlMakecsv開始執行")
 	err := godotenv.Load()
@@ -83,10 +85,17 @@ func main() {
 		writeheader = false
 	}
 
+	var file_type string
+	if strings.ToLower(os.Getenv("FILE_TYPE")) == "xlsx" {
+		file_type = "xlsx"
+	} else {
+		file_type = "csv"
+	}
+
 	Info.Println("正在讀取路徑")
 
 	sqlfiles, err := filepath.Glob("./sql/*.sql")
-	csvfiles, err := filepath.Glob("./csv/*.csv")
+	csvfiles, err := filepath.Glob("./" + file_type + "/*." + file_type)
 	//https://hsinyu.gitbooks.io/golang_note/content/map_1.html
 	//
 	csvfilesMap := map[string]int64{}
@@ -128,16 +137,16 @@ func main() {
 		case "MAKE_ALL":
 			break
 		case "MAKE_MODIFY":
-			if val, ok := csvfilesMap["csv/"+filepath.Base(sqlfiles[i])+".csv"]; ok {
+			if val, ok := csvfilesMap[file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
 				if ff, _ := os.Stat(sqlfiles[i]); ff.ModTime().Unix() < val {
-					Info.Println(sqlfiles[i] + "更新時間大於csv，不做產生動作")
+					Info.Println(sqlfiles[i] + "更新時間大於" + file_type + "，不做產生動作")
 					continue
 				}
 			}
 			break
-		case "MAKE_NOCSV":
-			if _, ok := csvfilesMap["csv/"+filepath.Base(sqlfiles[i])+".csv"]; ok {
-				Info.Println(sqlfiles[i] + "已經有csv，不做產生動作")
+		case "MAKE_NOFILE":
+			if _, ok := csvfilesMap[file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
+				Info.Println(sqlfiles[i] + "已經有" + file_type + "，不做產生動作")
 				continue
 			}
 			break
@@ -170,34 +179,38 @@ func main() {
 
 			isBak := true
 			//檢查是否有檔案
-			if _, ok := csvfilesMap["csv/"+filepath.Base(sqlfiles[i])+".csv"]; !ok {
+			if _, ok := csvfilesMap[file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type]; !ok {
 				Debug.Println(sqlfiles[i] + "沒有檔案，不做備份")
 				isBak = false
 			}
 			if isBak {
 				// t := time.Now().Local()
-				ff, _ := os.Stat("csv/" + filepath.Base(sqlfiles[i]) + ".csv")
+				ff, _ := os.Stat(file_type + "/" + filepath.Base(sqlfiles[i]) + "." + file_type)
 				t := time.Unix(ff.ModTime().Unix(), 0)
 				s := t.Format("20060102_150405")
-				err = os.Rename("csv/"+filepath.Base(sqlfiles[i])+".csv", "bak/"+filepath.Base(sqlfiles[i])+"_"+s+".csv")
+				err = os.Rename(file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type, "bak/"+filepath.Base(sqlfiles[i])+"_"+s+"."+file_type)
 				if err != nil {
-					Error.Println("csv/" + filepath.Base(sqlfiles[i]) + ".csv備份csv檔案發生錯誤")
+					Error.Println(file_type + "/" + filepath.Base(sqlfiles[i]) + "." + file_type + "備份" + file_type + "檔案發生錯誤")
 					Error.Println(err)
 				} else {
-					Info.Println("csv/" + filepath.Base(sqlfiles[i]) + "順利備份完畢")
+					Info.Println(file_type + "/" + filepath.Base(sqlfiles[i]) + "順利備份完畢")
 				}
 			}
 		}
 
 		csvConverterf := sqltocsv.New(rows)
 		csvConverterf.WriteHeaders = writeheader
-		Info.Println("產生csv中...")
-		err = csvConverterf.WriteFile("./csv/" + filepath.Base(sqlfiles[i]) + ".csv")
+		Info.Println("產生" + file_type + "中...")
+		if file_type == "xlsx" {
+			err = sql2xlsx.GenerateXLSXFromRows(rows, "./xlsx/"+filepath.Base(sqlfiles[i])+".xlsx", writeheader)
+		} else {
+			err = csvConverterf.WriteFile("./csv/" + filepath.Base(sqlfiles[i]) + ".csv")
+		}
 		if err != nil {
-			Error.Println("產生csv發生ERROR")
+			Error.Println("產生" + file_type + "發生ERROR")
 			Error.Println(err)
 		} else {
-			Info.Println("產生csv完成")
+			Info.Println("產生" + file_type + "完成")
 		}
 
 	}
