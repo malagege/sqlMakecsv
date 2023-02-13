@@ -137,7 +137,7 @@ func main() {
 		case "MAKE_ALL":
 			break
 		case "MAKE_MODIFY":
-			if val, ok := csvfilesMap[file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
+			if val, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
 				if ff, _ := os.Stat(sqlfiles[i]); ff.ModTime().Unix() < val {
 					Info.Println(sqlfiles[i] + "更新時間大於" + file_type + "，不做產生動作")
 					continue
@@ -145,7 +145,7 @@ func main() {
 			}
 			break
 		case "MAKE_NOFILE":
-			if _, ok := csvfilesMap[file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
+			if _, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
 				Info.Println(sqlfiles[i] + "已經有" + file_type + "，不做產生動作")
 				continue
 			}
@@ -179,21 +179,21 @@ func main() {
 
 			isBak := true
 			//檢查是否有檔案
-			if _, ok := csvfilesMap[file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type]; !ok {
+			if _, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; !ok {
 				Debug.Println(sqlfiles[i] + "沒有檔案，不做備份")
 				isBak = false
 			}
 			if isBak {
 				// t := time.Now().Local()
-				ff, _ := os.Stat(file_type + "/" + filepath.Base(sqlfiles[i]) + "." + file_type)
+				ff, _ := os.Stat(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "." + file_type)
 				t := time.Unix(ff.ModTime().Unix(), 0)
 				s := t.Format("20060102_150405")
-				err = os.Rename(file_type+"/"+filepath.Base(sqlfiles[i])+"."+file_type, "bak/"+filepath.Base(sqlfiles[i])+"_"+s+"."+file_type)
+				err = os.Rename(file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type, "bak/"+filepath.Base(sqlfiles[i])+"_"+s+"."+file_type)
 				if err != nil {
-					Error.Println(file_type + "/" + filepath.Base(sqlfiles[i]) + "." + file_type + "備份" + file_type + "檔案發生錯誤")
+					Error.Println(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "." + file_type + "備份" + file_type + "檔案發生錯誤")
 					Error.Println(err)
 				} else {
-					Info.Println(file_type + "/" + filepath.Base(sqlfiles[i]) + "順利備份完畢")
+					Info.Println(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "順利備份完畢")
 				}
 			}
 		}
