@@ -70,6 +70,38 @@ func init() {
 	}
 }
 
+func processRows(rows *sql.Rows, writeheader bool, fileType, sqlfile string, csvfilesMap map[string]int64) error {
+	defer rows.Close()
+
+	if strings.ToLower(os.Getenv("BACKUP_FILE")) == "true" {
+		Debug.Println(sqlfile + "備份檔案開始")
+
+		isBak := true
+		if _, ok := csvfilesMap[fileType+string(os.PathSeparator)+filepath.Base(sqlfile)+"."+fileType]; !ok {
+			Debug.Println(sqlfile + "沒有檔案，不做備份")
+			isBak = false
+		}
+		if isBak {
+			ff, _ := os.Stat(fileType + string(os.PathSeparator) + filepath.Base(sqlfile) + "." + fileType)
+			t := time.Unix(ff.ModTime().Unix(), 0)
+			s := t.Format("20060102_150405")
+			if err := os.Rename(fileType+string(os.PathSeparator)+filepath.Base(sqlfile)+"."+fileType, "bak/"+filepath.Base(sqlfile)+"_"+s+"."+fileType); err != nil {
+				Error.Println(fileType + string(os.PathSeparator) + filepath.Base(sqlfile) + "." + fileType + "備份" + fileType + "檔案發生錯誤")
+				return err
+			}
+			Info.Println(fileType + string(os.PathSeparator) + filepath.Base(sqlfile) + "順利備份完畢")
+		}
+	}
+
+	csvConverterf := sqltocsv.New(rows)
+	csvConverterf.WriteHeaders = writeheader
+	Info.Println("產生" + fileType + "中...")
+	if fileType == "xlsx" {
+		return sql2xlsx.GenerateXLSXFromRows(rows, "./xlsx/"+filepath.Base(sqlfile)+".xlsx", writeheader)
+	}
+	return csvConverterf.WriteFile("./csv/" + filepath.Base(sqlfile) + ".csv")
+}
+
 func main() {
 	_ = os.Mkdir("sql", 0755)
 	_ = os.Mkdir("csv", 0755)
@@ -174,37 +206,7 @@ func main() {
 			Error.Println(sqlstr)
 			continue
 		}
-		if err := func(rows *sql.Rows) error {
-			defer rows.Close()
-
-			if strings.ToLower(os.Getenv("BACKUP_FILE")) == "true" {
-				Debug.Println(sqlfiles[i] + "備份檔案開始")
-
-				isBak := true
-				if _, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; !ok {
-					Debug.Println(sqlfiles[i] + "沒有檔案，不做備份")
-					isBak = false
-				}
-				if isBak {
-					ff, _ := os.Stat(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "." + file_type)
-					t := time.Unix(ff.ModTime().Unix(), 0)
-					s := t.Format("20060102_150405")
-					if err := os.Rename(file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type, "bak/"+filepath.Base(sqlfiles[i])+"_"+s+"."+file_type); err != nil {
-						Error.Println(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "." + file_type + "備份" + file_type + "檔案發生錯誤")
-						return err
-					}
-					Info.Println(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "順利備份完畢")
-				}
-			}
-
-			csvConverterf := sqltocsv.New(rows)
-			csvConverterf.WriteHeaders = writeheader
-			Info.Println("產生" + file_type + "中...")
-			if file_type == "xlsx" {
-				return sql2xlsx.GenerateXLSXFromRows(rows, "./xlsx/"+filepath.Base(sqlfiles[i])+".xlsx", writeheader)
-			}
-			return csvConverterf.WriteFile("./csv/" + filepath.Base(sqlfiles[i]) + ".csv")
-		}(rows); err != nil {
+		if err := processRows(rows, writeheader, file_type, sqlfiles[i], csvfilesMap); err != nil {
 			Error.Println("產生" + file_type + "發生ERROR")
 			Error.Println(err)
 		} else {
