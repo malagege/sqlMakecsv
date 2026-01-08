@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/alexbrainman/odbc"
 	_ "github.com/denisenkom/go-mssqldb"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -30,13 +29,21 @@ var (
 )
 
 func init() {
-	err := godotenv.Load()
-	if err != nil {
-		Error.Println("載入設定檔出問題")
-		Error.Println(err)
+	Info = log.New(io.Discard, "Info:", log.Ldate|log.Ltime|log.Lshortfile)
+	Warning = log.New(io.Discard, "Warning:", log.Ldate|log.Ltime|log.Lshortfile)
+	Error = log.New(os.Stderr, "Error:", log.Ldate|log.Ltime|log.Lshortfile)
+	Debug = log.New(io.Discard, "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
+
+	if err := godotenv.Load(); err != nil {
+		log.Println("載入設定檔出問題")
+		log.Println(err)
 		os.Exit(1)
 	}
+
 	infoFile, err := os.OpenFile("info.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatalln("打開日誌文件失敗：", err)
+	}
 	errFile, err := os.OpenFile("error.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatalln("打開日誌文件失敗：", err)
@@ -70,32 +77,28 @@ func main() {
 	_ = os.Mkdir("xlsx", 0755)
 	_ = os.Mkdir("bak", 0755)
 	Info.Println("sqlMakecsv開始執行")
-	err := godotenv.Load()
-	if err != nil {
-		Error.Println("載入設定檔出問題")
-		Error.Println(err)
-		os.Exit(1)
-	}
+
 	driver := os.Getenv("DRIVER")
 	datasocure := os.Getenv("DATASOCURE")
-	var writeheader bool
-	if strings.ToLower(os.Getenv("WRITEHEADER")) == "true" {
-		writeheader = true
-	} else {
-		writeheader = false
-	}
+	writeheader := strings.ToLower(os.Getenv("WRITEHEADER")) == "true"
 
-	var file_type string
+	file_type := "csv"
 	if strings.ToLower(os.Getenv("FILE_TYPE")) == "xlsx" {
 		file_type = "xlsx"
-	} else {
-		file_type = "csv"
 	}
 
 	Info.Println("正在讀取路徑")
 
 	sqlfiles, err := filepath.Glob("./sql/*.sql")
+	if err != nil {
+		Error.Println("讀取SQL路徑有問題")
+		Error.Panic(err)
+	}
 	csvfiles, err := filepath.Glob("./" + file_type + "/*." + file_type)
+	if err != nil {
+		Error.Println("讀取檔案路徑有問題")
+		Error.Panic(err)
+	}
 	//https://hsinyu.gitbooks.io/golang_note/content/map_1.html
 	//
 	csvfilesMap := map[string]int64{}
@@ -108,11 +111,6 @@ func main() {
 		csvfilesMap[csvfiles[i]] = m1.Unix()
 	}
 	Info.Println("讀取路徑完成")
-
-	if err != nil {
-		Error.Println("讀取SQL路徑有問題")
-		Error.Panic(err)
-	}
 
 	Info.Println("正在DB連線")
 
@@ -213,6 +211,7 @@ func main() {
 			Info.Println("產生" + file_type + "完成")
 		}
 
+		rows.Close()
 	}
 
 	defer db.Close()
