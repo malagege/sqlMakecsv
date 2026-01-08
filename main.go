@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -57,12 +56,12 @@ func init() {
 	case "SHOW_ERROR":
 		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
 		Error = log.New(io.MultiWriter(os.Stderr, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
+		Debug = log.New(io.MultiWriter(io.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
 	case "HIDE_ALL":
 		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
 		Error = log.New(io.MultiWriter(infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
+		Debug = log.New(io.MultiWriter(io.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 		break
 	default: //SHOW_ALL
 		Info = log.New(io.MultiWriter(os.Stdout, infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
@@ -123,6 +122,7 @@ func main() {
 		Error.Println(err)
 		panic(err)
 	}
+	defer db.Close()
 
 	err = db.Ping()
 
@@ -155,7 +155,7 @@ func main() {
 		}
 
 		Info.Println("正在讀取" + sqlfiles[i])
-		sqls, err := ioutil.ReadFile(sqlfiles[i])
+		sqls, err := os.ReadFile(sqlfiles[i])
 		if err != nil {
 			Error.Println("讀取" + sqlfiles[i] + "發生錯誤，SQL如下")
 			Error.Println(sqls)
@@ -212,6 +212,5 @@ func main() {
 		}
 	}
 
-	defer db.Close()
 	Info.Println("sqlMakecsv執行完畢")
 }
