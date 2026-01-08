@@ -33,7 +33,7 @@ jobs:
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             OUTPUT="${OUTPUT}.exe"
           fi
-          go build -o "${OUTPUT}" ./...
+          go build -o "${OUTPUT}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
