@@ -1,0 +1,45 @@
+name: build-and-package
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          OUTPUT="dist/sqlMakecsv"
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            OUTPUT="${OUTPUT}.exe"
+          fi
+          go build -o "${OUTPUT}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlMakecsv-${{ matrix.os }}
+          path: dist/*
