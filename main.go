@@ -35,8 +35,8 @@ func init() {
 	Debug = log.New(io.Discard, "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
 
 	if err := godotenv.Load(); err != nil {
-		log.Println("載入設定檔出問題")
-		log.Println(err)
+		Error.Println("載入設定檔出問題")
+		Error.Println(err)
 		os.Exit(1)
 	}
 
@@ -92,12 +92,14 @@ func main() {
 	sqlfiles, err := filepath.Glob("./sql/*.sql")
 	if err != nil {
 		Error.Println("讀取SQL路徑有問題")
-		Error.Panic(err)
+		Error.Println(err)
+		panic(err)
 	}
 	csvfiles, err := filepath.Glob("./" + file_type + "/*." + file_type)
 	if err != nil {
 		Error.Println("讀取檔案路徑有問題")
-		Error.Panic(err)
+		Error.Println(err)
+		panic(err)
 	}
 	//https://hsinyu.gitbooks.io/golang_note/content/map_1.html
 	//
@@ -118,14 +120,16 @@ func main() {
 
 	if err != nil {
 		Error.Println("DB建立失敗")
-		Error.Panic(err)
+		Error.Println(err)
+		panic(err)
 	}
 
 	err = db.Ping()
 
 	if err != nil {
 		Error.Println("DB連線失敗")
-		Error.Panic(err)
+		Error.Println(err)
+		panic(err)
 	}
 
 	for i := 0; i < len(sqlfiles); i++ {
@@ -156,7 +160,7 @@ func main() {
 			Error.Println("讀取" + sqlfiles[i] + "發生錯誤，SQL如下")
 			Error.Println(sqls)
 			Error.Println(err)
-			Error.Panic(err)
+			panic(err)
 		}
 		sqlstr := string(sqls)
 
