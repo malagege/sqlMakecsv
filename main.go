@@ -1,220 +1,237 @@
+// sqlMakecsv：讀取 sql/ 目錄下的 .sql 檔，逐一對資料庫執行查詢，
+// 並將結果輸出成 csv 或 xlsx 檔案。設定由 .env（或環境變數）提供。
 package main
 
 import (
 	"database/sql"
+	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
-
-	_ "github.com/alexbrainman/odbc"
-	_ "github.com/denisenkom/go-mssqldb"
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/lib/pq"
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/joho/godotenv"
 	"github.com/joho/sqltocsv"
 	"github.com/malagege/sql2xlsx"
 )
 
-// for log
+// 全域 logger，依 DISPLAY_MODE 決定輸出到畫面與檔案的組合
 var (
-	Info    *log.Logger
-	Warning *log.Logger
-	Error   *log.Logger
-	Debug   *log.Logger
+	Info  *log.Logger
+	Error *log.Logger
+	Debug *log.Logger
 )
 
-func init() {
-	err := godotenv.Load()
-	if err != nil {
-		Error.Println("載入設定檔出問題")
-		Error.Println(err)
-		os.Exit(1)
+// config 集中管理所有設定值
+type config struct {
+	driver      string // 資料庫驅動：mysql / postgres / sqlserver / sqlite / odbc
+	dataSource  string // 連線字串
+	writeHeader bool   // 是否輸出欄位名稱列
+	makeMode    string // MAKE_ALL / MAKE_MODIFY / MAKE_NOFILE
+	backupFile  bool   // 產生前是否把舊檔搬到 bak/
+	fileType    string // csv / xlsx
+}
+
+// getenvClean 讀取環境變數並去除行內 # 註解與頭尾空白。
+// 只用在「選項型」設定；連線字串不可用（密碼可能含 #）。
+func getenvClean(key string) string {
+	v := os.Getenv(key)
+	if i := strings.Index(v, "#"); i >= 0 {
+		v = v[:i]
 	}
+	return strings.TrimSpace(v)
+}
+
+func loadConfig() config {
+	cfg := config{
+		driver:      strings.TrimSpace(os.Getenv("DRIVER")),
+		dataSource:  strings.TrimSpace(os.Getenv("DATASOURCE")),
+		writeHeader: strings.EqualFold(getenvClean("WRITEHEADER"), "true"),
+		makeMode:    strings.ToUpper(getenvClean("MAKE_MODE")),
+		backupFile:  strings.EqualFold(getenvClean("BACKUP_FILE"), "true"),
+		fileType:    strings.ToLower(getenvClean("FILE_TYPE")),
+	}
+	// 相容舊版設定檔的 DATASOCURE 拼字
+	if cfg.dataSource == "" {
+		cfg.dataSource = strings.TrimSpace(os.Getenv("DATASOCURE"))
+	}
+	// 舊版 sqlite3 驅動改用純 Go 的 modernc.org/sqlite，驅動名稱是 sqlite
+	if cfg.driver == "sqlite3" {
+		cfg.driver = "sqlite"
+	}
+	if cfg.fileType != "xlsx" {
+		cfg.fileType = "csv"
+	}
+	return cfg
+}
+
+// setupLoggers 依 DISPLAY_MODE 建立 Info / Error / Debug logger。
+// 回傳關閉 log 檔的函式。
+func setupLoggers(displayMode string) (func(), error) {
 	infoFile, err := os.OpenFile("info.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("打開 info.log 失敗: %w", err)
+	}
 	errFile, err := os.OpenFile("error.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		log.Fatalln("打開日誌文件失敗：", err)
+		infoFile.Close()
+		return nil, fmt.Errorf("打開 error.log 失敗: %w", err)
 	}
-	switch strings.ToUpper(os.Getenv("DISPLAY_MODE")) {
+
+	flags := log.Ldate | log.Ltime | log.Lshortfile
+	var infoW, errW, debugW io.Writer
+	switch displayMode {
 	case "SHOW_INFO":
-		Info = log.New(io.MultiWriter(os.Stdout, infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(os.Stderr, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
-		break
+		infoW = io.MultiWriter(os.Stdout, infoFile)
+		errW = io.MultiWriter(os.Stderr, infoFile, errFile)
+		debugW = infoFile
 	case "SHOW_ERROR":
-		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(os.Stderr, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
-		break
+		infoW = infoFile
+		errW = io.MultiWriter(os.Stderr, infoFile, errFile)
+		debugW = io.Discard
 	case "HIDE_ALL":
-		Info = log.New(io.MultiWriter(infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(ioutil.Discard), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
-		break
-	default: //SHOW_ALL
-		Info = log.New(io.MultiWriter(os.Stdout, infoFile), "Info:", log.Ldate|log.Ltime|log.Lshortfile)
-		Error = log.New(io.MultiWriter(os.Stdout, infoFile, errFile), "Error:", log.Ldate|log.Ltime|log.Lshortfile)
-		Debug = log.New(io.MultiWriter(os.Stdout, infoFile), "Debug:", log.Ldate|log.Ltime|log.Lshortfile)
+		infoW = infoFile
+		errW = io.MultiWriter(infoFile, errFile)
+		debugW = io.Discard
+	default: // SHOW_ALL
+		infoW = io.MultiWriter(os.Stdout, infoFile)
+		errW = io.MultiWriter(os.Stdout, infoFile, errFile)
+		debugW = io.MultiWriter(os.Stdout, infoFile)
 	}
+	Info = log.New(infoW, "Info:", flags)
+	Error = log.New(errW, "Error:", flags)
+	Debug = log.New(debugW, "Debug:", flags)
+
+	return func() {
+		infoFile.Close()
+		errFile.Close()
+	}, nil
 }
 
 func main() {
-	_ = os.Mkdir("sql", 0755)
-	_ = os.Mkdir("csv", 0755)
-	_ = os.Mkdir("xlsx", 0755)
-	_ = os.Mkdir("bak", 0755)
-	Info.Println("sqlMakecsv開始執行")
-	err := godotenv.Load()
+	// .env 不存在時不視為錯誤（可改用系統環境變數），其他錯誤才中止
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		log.Fatalln("載入 .env 設定檔出問題：", err)
+	}
+
+	closeLogs, err := setupLoggers(strings.ToUpper(getenvClean("DISPLAY_MODE")))
 	if err != nil {
-		Error.Println("載入設定檔出問題")
+		log.Fatalln(err)
+	}
+	defer closeLogs()
+
+	if err := run(loadConfig()); err != nil {
 		Error.Println(err)
 		os.Exit(1)
 	}
-	driver := os.Getenv("DRIVER")
-	datasocure := os.Getenv("DATASOCURE")
-	var writeheader bool
-	if strings.ToLower(os.Getenv("WRITEHEADER")) == "true" {
-		writeheader = true
-	} else {
-		writeheader = false
+}
+
+func run(cfg config) error {
+	Info.Println("sqlMakecsv 開始執行")
+
+	if cfg.driver == "" || cfg.dataSource == "" {
+		return fmt.Errorf("DRIVER 或 DATASOURCE 未設定，請確認 .env（可參考 .env.example）")
 	}
 
-	var file_type string
-	if strings.ToLower(os.Getenv("FILE_TYPE")) == "xlsx" {
-		file_type = "xlsx"
-	} else {
-		file_type = "csv"
-	}
-
-	Info.Println("正在讀取路徑")
-
-	sqlfiles, err := filepath.Glob("./sql/*.sql")
-	csvfiles, err := filepath.Glob("./" + file_type + "/*." + file_type)
-	//https://hsinyu.gitbooks.io/golang_note/content/map_1.html
-	//
-	csvfilesMap := map[string]int64{}
-	for i := range csvfiles {
-		fi, err := os.Stat(csvfiles[i])
-		if err != nil {
-			Error.Println(csvfiles[i] + "無法得到檔案狀況")
+	for _, dir := range []string{"sql", cfg.fileType, "bak"} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("建立目錄 %s 失敗: %w", dir, err)
 		}
-		m1 := fi.ModTime()
-		csvfilesMap[csvfiles[i]] = m1.Unix()
 	}
-	Info.Println("讀取路徑完成")
 
+	sqlFiles, err := filepath.Glob(filepath.Join("sql", "*.sql"))
 	if err != nil {
-		Error.Println("讀取SQL路徑有問題")
-		Error.Panic(err)
+		return fmt.Errorf("讀取 SQL 路徑有問題: %w", err)
+	}
+	if len(sqlFiles) == 0 {
+		Info.Println("sql 目錄下沒有 .sql 檔案，沒有事情可做")
+		return nil
 	}
 
-	Info.Println("正在DB連線")
-
-	db, err := sql.Open(driver, datasocure)
-
+	Info.Println("正在連線資料庫（driver=" + cfg.driver + "）")
+	db, err := sql.Open(cfg.driver, cfg.dataSource)
 	if err != nil {
-		Error.Println("DB建立失敗")
-		Error.Panic(err)
+		return fmt.Errorf("DB 建立失敗: %w", err)
 	}
-
-	err = db.Ping()
-
-	if err != nil {
-		Error.Println("DB連線失敗")
-		Error.Panic(err)
-	}
-
-	for i := 0; i < len(sqlfiles); i++ {
-
-		//檢查是否要讀取資料
-		switch strings.ToUpper(os.Getenv("MAKE_MODE")) {
-		case "MAKE_ALL":
-			break
-		case "MAKE_MODIFY":
-			if val, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
-				if ff, _ := os.Stat(sqlfiles[i]); ff.ModTime().Unix() < val {
-					Info.Println(sqlfiles[i] + "更新時間大於" + file_type + "，不做產生動作")
-					continue
-				}
-			}
-			break
-		case "MAKE_NOFILE":
-			if _, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; ok {
-				Info.Println(sqlfiles[i] + "已經有" + file_type + "，不做產生動作")
-				continue
-			}
-			break
-		}
-
-		Info.Println("正在讀取" + sqlfiles[i])
-		sqls, err := ioutil.ReadFile(sqlfiles[i])
-		if err != nil {
-			Error.Println("讀取" + sqlfiles[i] + "發生錯誤，SQL如下")
-			Error.Println(sqls)
-			Error.Println(err)
-			Error.Panic(err)
-		}
-		sqlstr := string(sqls)
-
-		Info.Println("讀取到SQL:" + sqlstr)
-		Info.Println("正在執行")
-		rows, err := db.Query(sqlstr)
-
-		if err != nil {
-			Error.Println("SQL查詢錯誤:")
-			Error.Println(err)
-			Error.Println(sqlstr)
-			continue
-		}
-
-		//備份csv
-		if strings.ToLower(os.Getenv("BACKUP_FILE")) == "true" {
-			Debug.Println(sqlfiles[i] + "備份檔案開始")
-
-			isBak := true
-			//檢查是否有檔案
-			if _, ok := csvfilesMap[file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type]; !ok {
-				Debug.Println(sqlfiles[i] + "沒有檔案，不做備份")
-				isBak = false
-			}
-			if isBak {
-				// t := time.Now().Local()
-				ff, _ := os.Stat(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "." + file_type)
-				t := time.Unix(ff.ModTime().Unix(), 0)
-				s := t.Format("20060102_150405")
-				err = os.Rename(file_type+string(os.PathSeparator)+filepath.Base(sqlfiles[i])+"."+file_type, "bak/"+filepath.Base(sqlfiles[i])+"_"+s+"."+file_type)
-				if err != nil {
-					Error.Println(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "." + file_type + "備份" + file_type + "檔案發生錯誤")
-					Error.Println(err)
-				} else {
-					Info.Println(file_type + string(os.PathSeparator) + filepath.Base(sqlfiles[i]) + "順利備份完畢")
-				}
-			}
-		}
-
-		csvConverterf := sqltocsv.New(rows)
-		csvConverterf.WriteHeaders = writeheader
-		Info.Println("產生" + file_type + "中...")
-		if file_type == "xlsx" {
-			err = sql2xlsx.GenerateXLSXFromRows(rows, "./xlsx/"+filepath.Base(sqlfiles[i])+".xlsx", writeheader)
-		} else {
-			err = csvConverterf.WriteFile("./csv/" + filepath.Base(sqlfiles[i]) + ".csv")
-		}
-		if err != nil {
-			Error.Println("產生" + file_type + "發生ERROR")
-			Error.Println(err)
-		} else {
-			Info.Println("產生" + file_type + "完成")
-		}
-
-	}
-
 	defer db.Close()
-	Info.Println("sqlMakecsv執行完畢")
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("DB 連線失敗: %w", err)
+	}
+
+	failed := 0
+	for _, sqlFile := range sqlFiles {
+		if err := processFile(db, cfg, sqlFile); err != nil {
+			Error.Println(sqlFile + " 處理失敗：" + err.Error())
+			failed++
+		}
+	}
+
+	Info.Println("sqlMakecsv 執行完畢")
+	if failed > 0 {
+		return fmt.Errorf("共 %d 個 SQL 檔處理失敗，詳見 error.log", failed)
+	}
+	return nil
+}
+
+// processFile 執行單一 SQL 檔並輸出結果檔
+func processFile(db *sql.DB, cfg config, sqlFile string) error {
+	outPath := filepath.Join(cfg.fileType, filepath.Base(sqlFile)+"."+cfg.fileType)
+	outStat, outErr := os.Stat(outPath)
+	outExists := outErr == nil
+
+	// 依 MAKE_MODE 決定是否略過
+	switch cfg.makeMode {
+	case "MAKE_MODIFY":
+		if outExists {
+			if sqlStat, err := os.Stat(sqlFile); err == nil && sqlStat.ModTime().Before(outStat.ModTime()) {
+				Info.Println(sqlFile + " 沒有比 " + outPath + " 新，不做產生動作")
+				return nil
+			}
+		}
+	case "MAKE_NOFILE":
+		if outExists {
+			Info.Println(sqlFile + " 已經有 " + outPath + "，不做產生動作")
+			return nil
+		}
+	}
+
+	Info.Println("正在讀取 " + sqlFile)
+	sqlBytes, err := os.ReadFile(sqlFile)
+	if err != nil {
+		return fmt.Errorf("讀取 SQL 檔失敗: %w", err)
+	}
+	sqlStr := string(sqlBytes)
+
+	Info.Println("正在執行 SQL：" + sqlStr)
+	rows, err := db.Query(sqlStr)
+	if err != nil {
+		return fmt.Errorf("SQL 查詢錯誤: %w", err)
+	}
+	defer rows.Close()
+
+	// 產生前先備份舊檔到 bak/（檔名帶上舊檔的修改時間）
+	if cfg.backupFile && outExists {
+		stamp := outStat.ModTime().Format("20060102_150405")
+		bakPath := filepath.Join("bak", filepath.Base(sqlFile)+"_"+stamp+"."+cfg.fileType)
+		if err := os.Rename(outPath, bakPath); err != nil {
+			Error.Println(outPath + " 備份失敗：" + err.Error())
+		} else {
+			Info.Println(outPath + " 順利備份到 " + bakPath)
+		}
+	}
+
+	Info.Println("產生 " + outPath + " 中...")
+	if cfg.fileType == "xlsx" {
+		err = sql2xlsx.GenerateXLSXFromRows(rows, outPath, cfg.writeHeader)
+	} else {
+		converter := sqltocsv.New(rows)
+		converter.WriteHeaders = cfg.writeHeader
+		err = converter.WriteFile(outPath)
+	}
+	if err != nil {
+		return fmt.Errorf("產生 %s 發生錯誤: %w", cfg.fileType, err)
+	}
+	Info.Println("產生 " + outPath + " 完成")
+	return nil
 }

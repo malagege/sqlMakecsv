@@ -1,0 +1,10 @@
+# 執行時產生的檔案
+*.log
+csv/
+xlsx/
+bak/
+
+# 編譯產物
+sqlMakecsv
+sqlMakecsv.exe
+dist/
