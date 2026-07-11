@@ -4,6 +4,23 @@
 
 支援 MySQL、PostgreSQL、SQL Server、SQLite、ODBC（Windows）。
 
+## 下載
+
+[Releases](https://github.com/malagege/sqlMakecsv/releases) 頁面提供各平台的現成執行檔：
+
+| 平台 | 檔案 |
+|------|------|
+| Windows x64 | `sqlMakecsv-<版本>-windows-amd64.zip` |
+| Windows ARM64 | `sqlMakecsv-<版本>-windows-arm64.zip`（不含 ODBC 驅動） |
+| Linux x64 | `sqlMakecsv-<版本>-linux-amd64.tar.gz` |
+| Linux ARM64（樹莓派 3/4/5 的 64 位元系統） | `sqlMakecsv-<版本>-linux-arm64.tar.gz` |
+| Linux ARMv6（樹莓派 32 位元系統，含 Pi 1 / Zero） | `sqlMakecsv-<版本>-linux-armv6.tar.gz` |
+| macOS Intel | `sqlMakecsv-<版本>-darwin-amd64.tar.gz` |
+| macOS Apple Silicon | `sqlMakecsv-<版本>-darwin-arm64.tar.gz` |
+
+發布新版本：推送 `v` 開頭的 tag（例如 `git tag v1.0.0 && git push origin v1.0.0`），
+GitHub Actions 會自動建置以上所有平台並建立 Release。
+
 ## 快速開始
 
 ```
@@ -78,7 +95,8 @@ set GOARCH=arm64
 go build -o dist/sqlMakecsv-darwin-arm64 .
 ```
 
-ODBC 驅動在 Windows 預設內建（走系統呼叫，不需 CGO）；
+ODBC 驅動在 Windows x86/x64 預設內建（走系統呼叫，不需 CGO）；
+windows/arm64 因上游套件不支援而不含 ODBC。
 Linux / macOS 如需 ODBC，須安裝 unixODBC 後用 `go build -tags odbc .` 建置。
 
 ## 目錄結構

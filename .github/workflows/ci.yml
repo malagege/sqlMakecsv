@@ -1,0 +1,42 @@
+# 每次 push / PR 時確認程式可以建置、通過 vet，並驗證各平台交叉編譯不會壞掉。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build & vet
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: Cross-compile check
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o /dev/null .
+          GOOS=windows GOARCH=arm64 go build -o /dev/null .
+          GOOS=linux   GOARCH=arm64 go build -o /dev/null .
+          GOOS=linux   GOARCH=arm GOARM=6 go build -o /dev/null .
+          GOOS=darwin  GOARCH=arm64 go build -o /dev/null .
+
+      - name: End-to-end test (SQLite)
+        run: |
+          go build -o sqlMakecsv .
+          mkdir -p e2e/sql
+          cd e2e
+          printf 'DRIVER=sqlite\nDATASOURCE=test.db\nWRITEHEADER=true\nMAKE_MODE=MAKE_ALL\nFILE_TYPE=csv\n' > .env
+          printf "SELECT 1 AS id, 'hello' AS name" > sql/demo.sql
+          ../sqlMakecsv
+          grep -q "1,hello" csv/demo.sql.csv && echo "E2E OK"
